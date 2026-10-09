@@ -7,7 +7,11 @@ export type SpriteKind =
   | 'billboardB'
   | 'billboardC'
   | 'cactus'
+  | 'pine'
+  | 'rock'
+  | 'tower'
   | 'gantryStart'
+  | 'gantryFork'
   | 'gantryCheckpoint'
   | 'gantryGoal'
   | 'carCoupe'
@@ -35,7 +39,11 @@ export const SPRITE_DEFS: Record<SpriteKind, SpriteDef> = {
   billboardB: { w: 300, h: 230, res: 2, collide: true },
   billboardC: { w: 300, h: 230, res: 2, collide: true },
   cactus: { w: 110, h: 220, res: 2, collide: true },
+  pine: { w: 150, h: 400, res: 2, collide: true },
+  rock: { w: 230, h: 170, res: 2, collide: true },
+  tower: { w: 360, h: 1100, res: 1, collide: true },
   gantryStart: { w: 640, h: 270, res: 2, collide: false },
+  gantryFork: { w: 640, h: 270, res: 2, collide: false },
   gantryCheckpoint: { w: 640, h: 270, res: 2, collide: false },
   gantryGoal: { w: 640, h: 270, res: 2, collide: false },
   carCoupe: { w: 80, h: 42, res: 5, collide: true },

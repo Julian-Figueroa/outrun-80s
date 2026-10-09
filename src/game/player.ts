@@ -11,17 +11,21 @@ import {
   SEGMENT_LENGTH,
   SPIN_OUT_MIN_SPEED,
 } from '../config';
-import { accelerate, approach, increase, limit } from '../math';
+import { accelerate, approach, increase, limit, percentRemaining } from '../math';
 import { spriteWorldWidth } from '../spriteDefs';
-import { findSegment } from '../track/course';
+import { branchOffset, findSegment, roadHalfWidth } from '../track/course';
 import type { InputState } from '../types';
 import { checkCarCollision, checkSpriteCollision } from './collision';
+import { updateRoute } from './route';
 import type { GameState } from './state';
 import { updateTraffic } from './traffic';
 
 const SKY_SPEED = 0.001;
 const HILL_SPEED = 0.002;
 const SUN_SPEED = 0.0015;
+/** parallax for the sideways drift of a split branch */
+const DRIFT_SKY = 0.004;
+const DRIFT_HILL = 0.008;
 
 export function updatePlayer(s: GameState, dt: number, input: InputState): void {
   const { track } = s;
@@ -33,9 +37,17 @@ export function updatePlayer(s: GameState, dt: number, input: InputState): void 
   const spinning = s.crashTimer > 0;
   const control = s.phase === 'playing' && !spinning;
 
-  updateTraffic(track, s.cars, dt, playerSegment, s.playerX, playerW, s.speed);
+  updateTraffic(track, s.cars, dt, playerSegment, s.playerX, playerW, s.speed, s.branch);
 
+  const driftBefore = branchOffset(playerSegment, percentRemaining(s.position + PLAYER_Z, SEGMENT_LENGTH), s.branch);
   s.position = increase(s.position, dt * s.speed, track.length);
+  updateRoute(s);
+  const z = s.position + PLAYER_Z;
+  const seg = findSegment(track, z);
+  const pct = percentRemaining(z, SEGMENT_LENGTH);
+  const drift = seg.spread1 > 0 ? branchOffset(seg, pct, s.branch) - driftBefore : 0;
+  s.skyOffset = increase(s.skyOffset, drift * DRIFT_SKY, 1);
+  s.hillOffset = increase(s.hillOffset, drift * DRIFT_HILL, 1);
 
   const steer = control ? (input.left ? -1 : 0) + (input.right ? 1 : 0) : 0;
   s.playerX += steer * dx;
@@ -56,20 +68,20 @@ export function updatePlayer(s: GameState, dt: number, input: InputState): void 
   else if (s.phase === 'gameover' || s.phase === 'finished') s.speed = accelerate(s.speed, BREAKING / 3, dt);
   else s.speed = accelerate(s.speed, DECEL, dt);
 
-  if (s.playerX < -1 || s.playerX > 1) {
+  if (Math.abs(s.playerX) > roadHalfWidth(seg, pct, s.branch)) {
     if (s.speed > OFFROAD_LIMIT) s.speed = accelerate(s.speed, OFFROAD_DECEL, dt);
     if (!spinning) {
-      const hit = checkSpriteCollision(playerSegment, s.playerX, playerW);
+      const hit = checkSpriteCollision(seg, s.playerX + branchOffset(seg, pct, s.branch), playerW);
       if (hit) {
         crash(s, s.speed > SPIN_OUT_MIN_SPEED);
         s.speed = Math.min(s.speed, MAX_SPEED / 5);
-        s.position = increase(playerSegment.p1.world.z, -PLAYER_Z, track.length);
+        s.position = increase(seg.p1.world.z, -PLAYER_Z, track.length);
       }
     }
   }
 
   if (!spinning) {
-    const car = checkCarCollision(playerSegment, s.playerX, playerW, s.speed);
+    const car = checkCarCollision(seg, s.playerX, playerW, s.speed, s.branch);
     if (car) {
       crash(s, s.speed - car.speed > SPIN_OUT_MIN_SPEED);
       s.speed = car.speed * (car.speed / s.speed);

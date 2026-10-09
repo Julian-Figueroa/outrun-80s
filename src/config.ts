@@ -32,10 +32,15 @@ export const DISPLAY_MAX_KMH = 293;
 export const CRASH_SPIN_TIME = 1.1;
 export const SPIN_OUT_MIN_SPEED = MAX_SPEED * 0.35;
 
-// a clean, traffic-free run finishes each stage with ~15s to spare (see tests/balance.test.ts)
-export const START_TIME = 48;
-export const CHECKPOINT_BONUS = [34, 32, 32];
-export const TOTAL_CARS = 140;
+// time per stage lives on each stage in track/course.ts; a clean, traffic-free run reaches every
+// checkpoint with roughly 12-16s to spare on any route (see tests/balance.test.ts)
+export const TRAFFIC_PER_SEGMENT = 0.02;
+
+// route split: the road widens over FORK_WIDEN segments, then the branches pull apart until their
+// centers are 2 × FORK_SPREAD road halves apart (far enough that the other one leaves the screen)
+export const FORK_WIDEN = 40;
+export const FORK_SPLIT = 300;
+export const FORK_SPREAD = 10;
 
 export const GRID_Z_SPACING = 4; // segments between horizontal grid lines
 export const GRID_X_OFFSETS: number[] = (() => {
@@ -44,24 +49,9 @@ export const GRID_X_OFFSETS: number[] = (() => {
   return xs;
 })();
 
+// HUD and marker colors; the world palette is per biome (track/biomes.ts)
 export const COLORS = {
-  fog: '#2b0b4f',
-  ground: '#12042a',
-  grid: '#e93fd3',
-  roadLight: '#2a1748',
-  roadDark: '#25133f',
-  rumbleLight: '#ff2a6d',
-  rumbleDark: '#05d9e8',
-  lane: '#d8f6ff',
   checkerA: '#f4f0ff',
-  checkerB: '#1a0b2e',
-  skyStops: [
-    [0, '#05010f'],
-    [0.45, '#1d0640'],
-    [0.75, '#5b0f6b'],
-    [0.92, '#c2237a'],
-    [1, '#ff6b5a'],
-  ] as [number, string][],
   neonPink: '#ff2a6d',
   neonCyan: '#05d9e8',
   neonYellow: '#ffe66d',

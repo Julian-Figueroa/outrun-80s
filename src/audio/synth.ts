@@ -1,7 +1,7 @@
 import type { GameEvent } from '../game/state';
 import { Engine, playSfx } from './engine';
 import type { AudioGraph } from './graph';
-import { Music } from './music';
+import { Music, type Song } from './music';
 
 /** owns the AudioContext; nothing is created until the first user gesture */
 export class AudioSystem {
@@ -45,10 +45,15 @@ export class AudioSystem {
     return this.muted;
   }
 
-  startMusic(): void {
+  /** plays `song`, switching (from the top) if another one is on */
+  playMusic(song: Song): void {
     if (!this.graph) return;
     this.musicPlayer ??= new Music(this.graph);
-    this.musicPlayer.start();
+    this.musicPlayer.play(song);
+  }
+
+  get unlocked(): boolean {
+    return this.graph !== null;
   }
 
   suspend(on: boolean): void {

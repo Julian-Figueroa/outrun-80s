@@ -1,14 +1,15 @@
-import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '../config';
+import { FORK_SPLIT, FORK_SPREAD, FORK_WIDEN, ROAD_WIDTH, RUMBLE_LENGTH, SEGMENT_LENGTH } from '../config';
 import { easeIn, easeInOut } from '../math';
 import type { Segment, SegPoint } from '../types';
+import type { BiomeId } from './biomes';
 
 export const LENGTH = { SHORT: 25, MEDIUM: 50, LONG: 100 } as const;
 export const HILL = { LOW: 20, MEDIUM: 40, HIGH: 60 } as const;
 export const CURVE = { EASY: 2, MEDIUM: 4, HARD: 6 } as const;
 
-function point(y: number, z: number): SegPoint {
+function point(x: number, y: number, z: number): SegPoint {
   return {
-    world: { x: 0, y, z },
+    world: { x, y, z },
     camera: { x: 0, y: 0, z: 0 },
     screen: { x: 0, y: 0, w: 0, scale: 0 },
   };
@@ -17,6 +18,10 @@ function point(y: number, z: number): SegPoint {
 /** Builds a road as a list of fixed-length segments, each with a curve and an end height. */
 export class TrackBuilder {
   readonly segments: Segment[] = [];
+  /** applied to every segment added from now on */
+  center = 0;
+  stageLevel = 0;
+  biome: BiomeId = 'coast';
 
   get count(): number {
     return this.segments.length;
@@ -27,17 +32,22 @@ export class TrackBuilder {
     return last ? last.p2.world.y : 0;
   }
 
-  addSegment(curve: number, y: number): void {
+  addSegment(curve: number, y: number, spread1 = 0, spread2 = 0): void {
     const n = this.segments.length;
+    const x = this.center * ROAD_WIDTH;
     this.segments.push({
       index: n,
-      p1: point(this.lastY(), n * SEGMENT_LENGTH),
-      p2: point(y, (n + 1) * SEGMENT_LENGTH),
+      p1: point(x, this.lastY(), n * SEGMENT_LENGTH),
+      p2: point(x, y, (n + 1) * SEGMENT_LENGTH),
       curve,
+      center: this.center,
+      spread1,
+      spread2,
+      level: this.stageLevel,
+      biome: this.biome,
       light: Math.floor(n / RUMBLE_LENGTH) % 2 === 0,
       sprites: [],
       cars: [],
-      looped: false,
       fog: 1,
       clip: 0,
     });
@@ -92,6 +102,18 @@ export class TrackBuilder {
     this.addRoad(n, n, n, -CURVE.EASY, height / 2);
     this.addRoad(n, n, n, 0, 0);
     return this;
+  }
+
+  /**
+   * A flat straight where the road widens into two side-by-side roads (spread 0 → 1), then the
+   * branches pull apart (spread 1 → FORK_SPREAD). Returns the segment index of the nose.
+   */
+  fork(): number {
+    const y = this.lastY();
+    const spreadAt = (n: number) =>
+      n <= FORK_WIDEN ? easeInOut(0, 1, n / FORK_WIDEN) : easeInOut(1, FORK_SPREAD, (n - FORK_WIDEN) / FORK_SPLIT);
+    for (let n = 0; n < FORK_WIDEN + FORK_SPLIT; n++) this.addSegment(0, y, spreadAt(n), spreadAt(n + 1));
+    return this.count - FORK_SPLIT;
   }
 
   /** ease back down to sea level */

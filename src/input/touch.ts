@@ -1,5 +1,5 @@
 import type { InputState } from '../types';
-import type { Action } from './keyboard';
+import { NAV, type Action } from './keyboard';
 
 /** wires the on-screen pads (index.html #touch) and tap-to-start on the canvas */
 export function createTouch(canvas: HTMLCanvasElement, onAction: (a: Action) => void): InputState {
@@ -8,6 +8,7 @@ export function createTouch(canvas: HTMLCanvasElement, onAction: (a: Action) => 
   document.querySelectorAll<HTMLButtonElement>('#touch [data-key]').forEach((btn) => {
     const key = btn.dataset.key as keyof InputState;
     const set = (on: boolean) => (e: PointerEvent) => {
+      if (on && !input[key]) onAction(NAV[key]);
       input[key] = on;
       btn.classList.toggle('on', on);
       if (on) btn.setPointerCapture(e.pointerId);

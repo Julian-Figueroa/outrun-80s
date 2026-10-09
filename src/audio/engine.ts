@@ -84,6 +84,10 @@ export function playSfx(g: AudioGraph, e: GameEvent): void {
     case 'beep':
       tone(g, 'square', e.high ? 1320 : 660, t, e.high ? 0.45 : 0.18, 0.18);
       break;
+    case 'split':
+      noise(g, t, 0.6, 0.35, 5000);
+      tone(g, 'triangle', e.side < 0 ? 520 : 780, t, 0.25, 0.12, e.side < 0 ? 390 : 1040);
+      break;
     case 'checkpoint':
       [69, 73, 76, 81, 85].forEach((m, i) => tone(g, 'square', mtof(m + 12), t + i * 0.07, 0.18, 0.12));
       break;

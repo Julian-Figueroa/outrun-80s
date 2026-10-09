@@ -1,3 +1,4 @@
+import { mulberry32 } from '../math';
 import { SPRITE_DEFS, type SpriteKind } from '../spriteDefs';
 
 /** every sprite is drawn procedurally once at startup into an offscreen canvas */
@@ -165,6 +166,105 @@ function drawCactus(g: Ctx, w: number, h: number) {
     g.lineTo(cx + dx, h - 4);
     g.stroke();
   }
+  g.restore();
+}
+
+/** stacked neon-edged tiers; reads well on dark green, icy and red palettes alike */
+function drawPine(g: Ctx, w: number, h: number) {
+  const cx = w / 2;
+  g.fillStyle = '#1a0c1f';
+  g.fillRect(cx - 7, h - 50, 14, 50);
+  const tiers = 5;
+  for (let i = 0; i < tiers; i++) {
+    const t = i / (tiers - 1);
+    const top = 6 + t * (h - 130);
+    const bottom = top + 110 - t * 10;
+    const half = 24 + t * (w / 2 - 30);
+    g.beginPath();
+    g.moveTo(cx, top);
+    g.lineTo(cx + half, bottom);
+    g.quadraticCurveTo(cx, bottom - 14, cx - half, bottom);
+    g.closePath();
+    g.fillStyle = i % 2 ? '#06281f' : '#0a3328';
+    g.fill();
+    g.strokeStyle = '#2affc6';
+    g.lineWidth = 2;
+    g.stroke();
+  }
+  g.fillStyle = 'rgba(216,255,240,0.85)';
+  for (let i = 0; i < tiers; i++) {
+    const top = 6 + (i / (tiers - 1)) * (h - 130);
+    g.beginPath();
+    g.moveTo(cx, top);
+    g.lineTo(cx + 9, top + 14);
+    g.lineTo(cx - 9, top + 14);
+    g.closePath();
+    g.fill();
+  }
+}
+
+function drawRock(g: Ctx, w: number, h: number) {
+  const pts: [number, number][] = [
+    [6, h],
+    [18, h * 0.45],
+    [w * 0.3, h * 0.12],
+    [w * 0.5, h * 0.02],
+    [w * 0.68, h * 0.2],
+    [w * 0.86, h * 0.35],
+    [w - 6, h],
+  ];
+  const grad = g.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#8a2f24');
+  grad.addColorStop(1, '#2a0b0b');
+  g.fillStyle = grad;
+  g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.fill();
+  g.strokeStyle = '#ffb347';
+  g.lineWidth = 2.5;
+  g.stroke();
+  // strata
+  g.save();
+  g.clip();
+  g.strokeStyle = 'rgba(255,140,80,0.35)';
+  g.lineWidth = 1.5;
+  for (let y = h * 0.3; y < h; y += h / 7) {
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(w, y + 8);
+    g.stroke();
+  }
+  g.restore();
+}
+
+/** a skyscraper with a lit window grid and a neon crown */
+function drawTower(g: Ctx, w: number, h: number) {
+  const rng = mulberry32(42);
+  const x0 = 20;
+  const bw = w - 40;
+  const grad = g.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#1b1450');
+  grad.addColorStop(1, '#07061a');
+  g.fillStyle = grad;
+  g.fillRect(x0, 60, bw, h - 60);
+  g.fillRect(x0 + bw * 0.3, 20, bw * 0.4, 40);
+  g.fillStyle = '#ff2a6d';
+  g.fillRect(x0 + bw / 2 - 2, 0, 4, 22);
+  for (let y = 80; y < h - 30; y += 28) {
+    for (let x = x0 + 16; x < x0 + bw - 24; x += 26) {
+      const r = rng();
+      if (r < 0.45) continue;
+      g.fillStyle = r < 0.8 ? 'rgba(122,240,255,0.75)' : 'rgba(255,230,109,0.8)';
+      g.fillRect(x, y, 14, 14);
+    }
+  }
+  g.save();
+  g.shadowColor = '#05d9e8';
+  g.shadowBlur = 16;
+  g.strokeStyle = '#05d9e8';
+  g.lineWidth = 5;
+  g.strokeRect(x0, 60, bw, h - 60);
   g.restore();
 }
 
@@ -422,11 +522,15 @@ export function createSprites(): SpriteSheet {
     lampL,
     lampR: mirror(lampL),
     cactus: make('cactus', drawCactus),
+    pine: make('pine', drawPine),
+    rock: make('rock', drawRock),
+    tower: make('tower', drawTower),
     billboardA: make('billboardA', billboard('NEON COLA', 'TASTE THE GLOW', '#ff2a6d', '#ffe66d')),
     billboardB: make('billboardB', billboard('HYPERWAVE', 'RADIO  101.9 FM', '#05d9e8', '#ff7ab8')),
     billboardC: make('billboardC', billboard('CHROME', 'MOTOR CLUB  ·  EST 1986', '#ffe66d', '#05d9e8')),
     gantryStart: make('gantryStart', gantry('START', '#05d9e8', true)),
     gantryCheckpoint: make('gantryCheckpoint', gantry('CHECKPOINT', '#ffe66d', false)),
+    gantryFork: make('gantryFork', gantry('<< SPLIT >>', '#2affc6', false)),
     gantryGoal: make('gantryGoal', gantry('GOAL', '#ff2a6d', true)),
     carCoupe: make(
       'carCoupe',

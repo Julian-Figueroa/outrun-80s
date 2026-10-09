@@ -16,7 +16,8 @@ import {
 import type { GameState } from '../game/state';
 import { exponentialFog, interpolate, percentRemaining, project } from '../math';
 import { SPRITE_DEFS, SPRITE_SCALE, type SpriteKind } from '../spriteDefs';
-import { findSegment } from '../track/course';
+import { BIOMES } from '../track/biomes';
+import { branchOffset, findSegment, roadHalfWidth, spreadAt } from '../track/course';
 import type { Segment } from '../types';
 import type { SpriteSheet } from './sprites';
 
@@ -27,17 +28,17 @@ type Ctx = CanvasRenderingContext2D;
 const FOG_STEPS = 32;
 const fogCache = new Map<string, string>();
 
-function hexToRgb(hex: string): [number, number, number] {
+export function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function fogged(color: string, fog: number): string {
+function fogged(color: string, fog: number, fogColor: string): string {
   const q = Math.round(fog * FOG_STEPS);
-  const key = color + q;
+  const key = color + fogColor + q;
   let out = fogCache.get(key);
   if (!out) {
-    const a = hexToRgb(COLORS.fog);
+    const a = hexToRgb(fogColor);
     const b = hexToRgb(color);
     const t = q / FOG_STEPS;
     out = `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`;
@@ -54,12 +55,19 @@ function quad(ctx: Ctx, x1: number, y1: number, x2: number, y2: number, x3: numb
   ctx.closePath();
 }
 
+const SINGLE = [0];
+const SPLIT = [-1, 1];
+
+/** a single road, or in a fork zone two roads centered `spread` road halves either side of the frame */
 function drawSegment(ctx: Ctx, width: number, seg: Segment) {
   const { x: x1, y: y1, w: w1 } = seg.p1.screen;
   const { x: x2, y: y2, w: w2 } = seg.p2.screen;
   const fog = seg.fog;
+  const biome = BIOMES[seg.biome];
+  const tint = (color: string, f = fog) => fogged(color, f, biome.fog);
+  const branches = seg.spread1 === 0 && seg.spread2 === 0 ? SINGLE : SPLIT;
 
-  ctx.fillStyle = fogged(COLORS.ground, fog);
+  ctx.fillStyle = tint(biome.ground);
   ctx.fillRect(0, y2, width, y1 - y2 + 1);
 
   // neon grid: lateral lines follow the road's curve, cross lines every few segments
@@ -76,20 +84,29 @@ function drawSegment(ctx: Ctx, width: number, seg: Segment) {
     const t = Math.max(1, (y1 - y2) * 0.2);
     ctx.rect(0, y1 - t, width, t);
   }
-  ctx.fillStyle = fogged(COLORS.grid, fog * 0.85);
+  ctx.fillStyle = tint(biome.grid, fog * 0.85);
   ctx.fill();
 
+  // rumbles first, so where the branches still overlap the other road paints over the inner ones
   const r1 = w1 / Math.max(6, 2 * LANES);
   const r2 = w2 / Math.max(6, 2 * LANES);
   ctx.beginPath();
-  quad(ctx, x1 - w1 - r1, y1, x1 - w1, y1, x2 - w2, y2, x2 - w2 - r2, y2);
-  quad(ctx, x1 + w1 + r1, y1, x1 + w1, y1, x2 + w2, y2, x2 + w2 + r2, y2);
-  ctx.fillStyle = fogged(seg.light ? COLORS.rumbleLight : COLORS.rumbleDark, fog);
+  for (const dir of branches) {
+    const c1 = x1 + dir * seg.spread1 * w1;
+    const c2 = x2 + dir * seg.spread2 * w2;
+    quad(ctx, c1 - w1 - r1, y1, c1 - w1, y1, c2 - w2, y2, c2 - w2 - r2, y2);
+    quad(ctx, c1 + w1 + r1, y1, c1 + w1, y1, c2 + w2, y2, c2 + w2 + r2, y2);
+  }
+  ctx.fillStyle = tint(seg.light ? biome.rumbleLight : biome.rumbleDark);
   ctx.fill();
 
   ctx.beginPath();
-  quad(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
-  ctx.fillStyle = fogged(seg.light ? COLORS.roadLight : COLORS.roadDark, fog);
+  for (const dir of branches) {
+    const c1 = x1 + dir * seg.spread1 * w1;
+    const c2 = x2 + dir * seg.spread2 * w2;
+    quad(ctx, c1 - w1, y1, c1 + w1, y1, c2 + w2, y2, c2 - w2, y2);
+  }
+  ctx.fillStyle = tint(seg.light ? biome.roadLight : biome.roadDark);
   ctx.fill();
 
   if (seg.marker) {
@@ -103,7 +120,7 @@ function drawSegment(ctx: Ctx, width: number, seg: Segment) {
       const b2 = x2 - w2 + (2 * w2 * (c + 1)) / cols;
       quad(ctx, a1, y1, b1, y1, b2, y2, a2, y2);
     }
-    ctx.fillStyle = fogged(COLORS.checkerA, fog);
+    ctx.fillStyle = tint(COLORS.checkerA);
     ctx.fill();
   } else if (seg.light) {
     const l1 = w1 / 32;
@@ -111,12 +128,16 @@ function drawSegment(ctx: Ctx, width: number, seg: Segment) {
     const lane1 = (2 * w1) / LANES;
     const lane2 = (2 * w2) / LANES;
     ctx.beginPath();
-    for (let lane = 1; lane < LANES; lane++) {
-      const a = x1 - w1 + lane1 * lane;
-      const b = x2 - w2 + lane2 * lane;
-      quad(ctx, a - l1 / 2, y1, a + l1 / 2, y1, b + l2 / 2, y2, b - l2 / 2, y2);
+    for (const dir of branches) {
+      const c1 = x1 + dir * seg.spread1 * w1;
+      const c2 = x2 + dir * seg.spread2 * w2;
+      for (let lane = 1; lane < LANES; lane++) {
+        const a = c1 - w1 + lane1 * lane;
+        const b = c2 - w2 + lane2 * lane;
+        quad(ctx, a - l1 / 2, y1, a + l1 / 2, y1, b + l2 / 2, y2, b - l2 / 2, y2);
+      }
     }
-    ctx.fillStyle = fogged(COLORS.lane, fog);
+    ctx.fillStyle = tint(biome.lane);
     ctx.fill();
   }
 }
@@ -147,12 +168,19 @@ function drawSprite(
   ctx.drawImage(img, 0, 0, img.width, img.height - (img.height * clipH) / destH, x, y, destW, destH - clipH);
 }
 
-function drawPlayer(ctx: Ctx, width: number, height: number, s: GameState, sprites: SpriteSheet, destY: number) {
+function drawPlayer(
+  ctx: Ctx,
+  width: number,
+  height: number,
+  s: GameState,
+  sprites: SpriteSheet,
+  destY: number,
+  offroad: boolean,
+) {
   const scale = CAMERA_DEPTH / PLAYER_Z;
   const kind: SpriteKind = s.braking ? 'playerBrake' : 'player';
   const [destW, destH] = spriteSize(kind, scale, width);
   const speedPercent = s.speed / MAX_SPEED;
-  const offroad = Math.abs(s.playerX) > 1;
   const shake = (offroad ? 4 : 1.2) * Math.random() * speedPercent * (height / 480) * (Math.random() < 0.5 ? -1 : 1);
 
   ctx.save();
@@ -189,6 +217,10 @@ export function renderWorld(ctx: Ctx, width: number, height: number, s: GameStat
   const playerSegment = findSegment(track, s.position + PLAYER_Z);
   const playerPercent = percentRemaining(s.position + PLAYER_Z, SEGMENT_LENGTH);
   const playerY = interpolate(playerSegment.p1.world.y, playerSegment.p2.world.y, playerPercent);
+  // the camera rides along the player's branch; segment frames carry their own center in world.x
+  const routeX = playerSegment.center + branchOffset(playerSegment, playerPercent, s.branch);
+  const camX = (routeX + s.playerX) * ROAD_WIDTH;
+  const camY = playerY + CAMERA_HEIGHT;
 
   let maxY = height;
   let x = 0;
@@ -196,16 +228,14 @@ export function renderWorld(ctx: Ctx, width: number, height: number, s: GameStat
   const projected: Segment[] = [];
   const visible: Segment[] = [];
 
-  for (let n = 0; n < DRAW_DISTANCE; n++) {
-    const seg = segments[(baseSegment.index + n) % segments.length];
-    seg.looped = seg.index < baseSegment.index;
+  // the track only extends as far as the route has been decided, so stop at its end
+  const last = Math.min(DRAW_DISTANCE, segments.length - baseSegment.index);
+  for (let n = 0; n < last; n++) {
+    const seg = segments[baseSegment.index + n];
     seg.fog = exponentialFog(n / DRAW_DISTANCE, FOG_DENSITY);
     seg.clip = maxY;
-    const camX = s.playerX * ROAD_WIDTH;
-    const camY = playerY + CAMERA_HEIGHT;
-    const camZ = s.position - (seg.looped ? track.length : 0);
-    project(seg.p1, camX - x, camY, camZ, CAMERA_DEPTH, width, height, ROAD_WIDTH);
-    project(seg.p2, camX - x - dx, camY, camZ, CAMERA_DEPTH, width, height, ROAD_WIDTH);
+    project(seg.p1, camX - x, camY, s.position, CAMERA_DEPTH, width, height, ROAD_WIDTH);
+    project(seg.p2, camX - x - dx, camY, s.position, CAMERA_DEPTH, width, height, ROAD_WIDTH);
     x += dx;
     dx += seg.curve;
 
@@ -224,7 +254,8 @@ export function renderWorld(ctx: Ctx, width: number, height: number, s: GameStat
 
     for (const car of seg.cars) {
       const scale = interpolate(seg.p1.screen.scale, seg.p2.screen.scale, car.percent);
-      const sx = interpolate(seg.p1.screen.x, seg.p2.screen.x, car.percent) + (scale * car.offset * ROAD_WIDTH * width) / 2;
+      const offset = car.offset + car.branch * spreadAt(seg, car.percent);
+      const sx = interpolate(seg.p1.screen.x, seg.p2.screen.x, car.percent) + (scale * offset * ROAD_WIDTH * width) / 2;
       const sy = interpolate(seg.p1.screen.y, seg.p2.screen.y, car.percent);
       drawSprite(ctx, width, sprites[car.kind], car.kind, scale, sx, sy, -0.5, seg.clip);
     }
@@ -240,7 +271,8 @@ export function renderWorld(ctx: Ctx, width: number, height: number, s: GameStat
     if (seg === playerSegment) {
       const camY = interpolate(playerSegment.p1.camera.y, playerSegment.p2.camera.y, playerPercent);
       const destY = height / 2 - ((CAMERA_DEPTH / PLAYER_Z) * camY * height) / 2;
-      drawPlayer(ctx, width, height, s, sprites, destY);
+      const offroad = Math.abs(s.playerX) > roadHalfWidth(playerSegment, playerPercent, s.branch);
+      drawPlayer(ctx, width, height, s, sprites, destY, offroad);
     }
   }
 }

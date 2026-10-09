@@ -1,10 +1,21 @@
-import { COLORS } from '../config';
 import { mulberry32 } from '../math';
+import { BIOMES, type Biome, type BiomeId } from '../track/biomes';
 
-interface Offsets {
+interface View {
   skyOffset: number;
   hillOffset: number;
   sunOffset: number;
+  biome: BiomeId;
+  prevBiome: BiomeId;
+  biomeBlend: number;
+}
+
+interface Layers {
+  sky: HTMLCanvasElement;
+  sun: HTMLCanvasElement;
+  far: HTMLCanvasElement;
+  near: HTMLCanvasElement;
+  biome: Biome;
 }
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -74,26 +85,32 @@ function mountainLayer(width: number, height: number, seed: number, fill: [strin
   return c;
 }
 
+/** sky, sun and mountains per biome, baked lazily at the current size */
 export class Background {
   private w = 0;
   private h = 0;
-  private sky!: HTMLCanvasElement;
-  private sun!: HTMLCanvasElement;
-  private far!: HTMLCanvasElement;
-  private near!: HTMLCanvasElement;
+  private readonly layers = new Map<BiomeId, Layers>();
 
   resize(w: number, h: number): void {
     this.w = w;
     this.h = h;
+    this.layers.clear();
+  }
+
+  private bake(id: BiomeId): Layers {
+    let out = this.layers.get(id);
+    if (out) return out;
+    const { w, h } = this;
+    const biome = BIOMES[id];
     const horizon = h / 2;
 
     const [sky, sg] = canvas(w, horizon + 2);
     const grad = sg.createLinearGradient(0, 0, 0, horizon);
-    for (const [stop, color] of COLORS.skyStops) grad.addColorStop(stop, color);
+    for (const [stop, color] of biome.skyStops) grad.addColorStop(stop, color);
     sg.fillStyle = grad;
     sg.fillRect(0, 0, w, horizon + 2);
     const rng = mulberry32(7);
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < biome.stars; i++) {
       const y = Math.pow(rng(), 1.8) * horizon * 0.7;
       sg.globalAlpha = 0.3 + rng() * 0.7 * (1 - y / horizon);
       sg.fillStyle = rng() < 0.2 ? '#ffd6f5' : '#ffffff';
@@ -101,21 +118,28 @@ export class Background {
       sg.fillRect(rng() * w, y, r * (h / 480), r * (h / 480));
     }
     sg.globalAlpha = 1;
-    this.sky = sky;
 
-    this.sun = this.makeSun(h * 0.2);
     const tileW = Math.max(w, h) * 1.6;
-    this.far = mountainLayer(tileW, h * 0.15, 3, ['#3a0f63', '#1c0638'], '#ff4fd8', [2, 3, 5, 9]);
-    this.near = mountainLayer(tileW, h * 0.09, 11, ['#1d0638', '#12042a'], '#05d9e8', [3, 4, 7, 13]);
+    const [farTop, farBottom, farLine] = biome.far;
+    const [nearTop, nearBottom, nearLine] = biome.near;
+    out = {
+      sky,
+      sun: this.makeSun(h * 0.2, biome),
+      far: mountainLayer(tileW, h * 0.15, 3, [farTop, farBottom], farLine, [2, 3, 5, 9]),
+      near: mountainLayer(tileW, h * 0.09, 11, [nearTop, nearBottom], nearLine, [3, 4, 7, 13]),
+      biome,
+    };
+    this.layers.set(id, out);
+    return out;
   }
 
-  private makeSun(r: number): HTMLCanvasElement {
+  private makeSun(r: number, biome: Biome): HTMLCanvasElement {
     const size = r * 3.2;
     const [disc, dg] = canvas(r * 2, r * 2);
     const grad = dg.createLinearGradient(0, 0, 0, r * 2);
-    grad.addColorStop(0, '#fff3a3');
-    grad.addColorStop(0.45, '#ffb347');
-    grad.addColorStop(1, '#ff2a6d');
+    grad.addColorStop(0, biome.sun[0]);
+    grad.addColorStop(0.45, biome.sun[1]);
+    grad.addColorStop(1, biome.sun[2]);
     dg.fillStyle = grad;
     dg.beginPath();
     dg.arc(r, r, r, 0, Math.PI * 2);
@@ -128,32 +152,43 @@ export class Background {
 
     const [c, g] = canvas(size, size);
     const glow = g.createRadialGradient(size / 2, size / 2, r * 0.6, size / 2, size / 2, size / 2);
-    glow.addColorStop(0, 'rgba(255,80,150,0.45)');
-    glow.addColorStop(1, 'rgba(255,80,150,0)');
+    glow.addColorStop(0, `rgba(${biome.sunGlow},0.45)`);
+    glow.addColorStop(1, `rgba(${biome.sunGlow},0)`);
     g.fillStyle = glow;
     g.fillRect(0, 0, size, size);
     g.drawImage(disc, size / 2 - r, size / 2 - r);
     return c;
   }
 
-  draw(ctx: CanvasRenderingContext2D, o: Offsets): void {
+  draw(ctx: CanvasRenderingContext2D, v: View): void {
+    if (v.biomeBlend < 1 && v.prevBiome !== v.biome) {
+      this.drawLayers(ctx, this.bake(v.prevBiome), v);
+      ctx.globalAlpha = v.biomeBlend;
+      this.drawLayers(ctx, this.bake(v.biome), v);
+      ctx.globalAlpha = 1;
+    } else {
+      this.drawLayers(ctx, this.bake(v.biome), v);
+    }
+  }
+
+  private drawLayers(ctx: CanvasRenderingContext2D, l: Layers, v: View): void {
     const { w, h } = this;
     const horizon = h / 2;
-    ctx.drawImage(this.sky, 0, 0);
+    ctx.drawImage(l.sky, 0, 0);
 
-    const sunX = w / 2 + o.sunOffset * w - this.sun.width / 2;
-    const sunY = horizon - this.sun.height / 2 - h * 0.05;
-    ctx.drawImage(this.sun, sunX, sunY);
+    const sunX = w / 2 + v.sunOffset * w - l.sun.width / 2;
+    const sunY = horizon - l.sun.height / 2 - h * 0.05;
+    ctx.drawImage(l.sun, sunX, sunY);
 
-    this.tile(ctx, this.far, o.skyOffset, horizon - this.far.height + 1);
-    this.tile(ctx, this.near, o.hillOffset, horizon - this.near.height + 1);
+    this.tile(ctx, l.far, v.skyOffset, horizon - l.far.height + 1);
+    this.tile(ctx, l.near, v.hillOffset, horizon - l.near.height + 1);
 
-    ctx.fillStyle = COLORS.fog;
+    ctx.fillStyle = l.biome.fog;
     ctx.fillRect(0, horizon, w, h - horizon);
     const glow = ctx.createLinearGradient(0, horizon - h * 0.01, 0, horizon + h * 0.03);
-    glow.addColorStop(0, 'rgba(255,107,213,0)');
-    glow.addColorStop(0.3, 'rgba(255,107,213,0.75)');
-    glow.addColorStop(1, 'rgba(255,107,213,0)');
+    glow.addColorStop(0, `rgba(${l.biome.horizonGlow},0)`);
+    glow.addColorStop(0.3, `rgba(${l.biome.horizonGlow},0.75)`);
+    glow.addColorStop(1, `rgba(${l.biome.horizonGlow},0)`);
     ctx.fillStyle = glow;
     ctx.fillRect(0, horizon - h * 0.01, w, h * 0.04);
   }
